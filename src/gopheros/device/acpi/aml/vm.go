@@ -122,6 +122,44 @@ func (vm *VM) Visit(entType EntityType, visitorFn Visitor) {
 	scopeVisit(0, vm.rootNS, entType, visitorFn)
 }
 
+// execBlock attempts to execute all AML opcodes in the supplied scoped entity.
+// If all opcodes are successfully executed, the provided execContext will be
+// updated to reflect the current VM state. Otherwise, an error will be
+// returned.
+func (vm *VM) execBlock(ctx *execContext, block ScopeEntity) *kernel.Error {
+	instrList := block.Children()
+	numInstr := len(instrList)
+
+instrLoop:
+	for instrIndex := 0; instrIndex < numInstr; instrIndex++ {
+		instr := instrList[instrIndex]
+		if err := vm.jumpTable[instr.getOpcode()](ctx, instr); err != nil {
+			return err
+		}
+
+		// Check for changes in the execution control flow
+		switch ctx.ctrlFlow {
+		case ctrlFlowTypeNextOpcode:
+			continue
+		case ctrlFlowTypeBreak:
+			// Switch to sequential execution for instructions
+			// following the block we just broke out of.
+			ctx.ctrlFlow = ctrlFlowTypeNextOpcode
+			break instrLoop
+		case ctrlFlowTypeFnReturn:
+			break instrLoop
+		case ctrlFlowTypeContinue:
+			// Restart execution from first instruction; set instr
+			// index to -1 as it will be incremented for the next
+			// loop iteration.
+			instrIndex = -1
+			ctx.ctrlFlow = ctrlFlowTypeNextOpcode
+		}
+	}
+
+	return nil
+}
+
 // defaultACPIScopes constructs a tree of scoped entities that correspond to
 // the predefined scopes contained in the ACPI specification and returns back
 // its root node.
