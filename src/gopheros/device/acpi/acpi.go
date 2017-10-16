@@ -2,6 +2,7 @@ package acpi
 
 import (
 	"gopheros/device"
+	"gopheros/device/acpi/aml"
 	"gopheros/device/acpi/table"
 	"gopheros/kernel"
 	"gopheros/kernel/kfmt"
@@ -45,17 +46,28 @@ type acpiDriver struct {
 	// by the table name. All tables included in this map are mapped into
 	// memory.
 	tableMap map[string]*table.SDTHeader
+
+	// The AML interpreter used by the ACPI driver to execute various
+	// ACPI-related methods.
+	amlVM *aml.VM
 }
 
 // DriverInit initializes this driver.
 func (drv *acpiDriver) DriverInit(w io.Writer) *kernel.Error {
-	if err := drv.enumerateTables(w); err != nil {
+	var err *kernel.Error
+
+	if err = drv.enumerateTables(w); err != nil {
 		return err
 	}
-
 	drv.printTableInfo(w)
 
-	return nil
+	// Now that we have enumerated the available ACPI tables we can
+	// initialize the AML interpreter passing the driver instance as
+	// a table.Resolver.
+	drv.amlVM = aml.NewVM(w, drv)
+	err = drv.amlVM.Init()
+
+	return err
 }
 
 // DriverName returns the name of this driver.
@@ -66,6 +78,11 @@ func (*acpiDriver) DriverName() string {
 // DriverVersion returns the version of this driver.
 func (*acpiDriver) DriverVersion() (uint16, uint16, uint16) {
 	return 0, 0, 1
+}
+
+// LookupTable implements the table.Resolver interface.
+func (drv *acpiDriver) LookupTable(name string) *table.SDTHeader {
+	return drv.tableMap[name]
 }
 
 func (drv *acpiDriver) printTableInfo(w io.Writer) {
